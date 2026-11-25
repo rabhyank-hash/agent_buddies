@@ -1,7 +1,13 @@
 """Run a sweep: every (system, pressure level, query) cell once, resumable.
 
-  uv run python scripts/run.py --systems L0 M-iso --levels 0 1 --n 100     # RQ1 pilot (kill test)
-  uv run python scripts/run.py --dry-run                                   # offline smoke test, toy data
+  uv run python scripts/run.py --split pilot --systems L0 M-iso --levels 0 1        # RQ1 kill test
+  uv run python scripts/run.py --split core --systems L0 S-iso M-iso                 # crossover sweep
+  uv run python scripts/run.py --split ablation --set agents.relay_cap_tokens=256 ... # an ablation
+  uv run python scripts/run.py --dry-run                                            # offline smoke test
+
+Splits (fixed seed, non-overlapping; see crossover.data.split_queries):
+pilot (50), core (500), ablation (first 150 of core), rest (~280 after core),
+nonpilot (core + rest, for the P100 S-iso vs. M-iso contrast).
 """
 
 from __future__ import annotations
@@ -14,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from crossover.agents import SYSTEMS
 from crossover.config import load_config
-from crossover.data import load_corpus, load_queries, split_queries
+from crossover.data import SPLITS, load_corpus, load_queries, split_queries
 from crossover.harness import run_sweep
 from crossover.llm import ScriptedLLM, build_llm
 from crossover.retrieval import BM25Retriever, build_retriever
@@ -28,8 +34,8 @@ def main() -> None:
     ap.add_argument("--set", action="append", default=[], help="override, e.g. budget.B=80000")
     ap.add_argument("--systems", nargs="+", default=["L0", "S-iso", "M-iso"], choices=sorted(SYSTEMS))
     ap.add_argument("--levels", nargs="+", type=float, help="pressure levels in [0,1]; default from config")
-    ap.add_argument("--n", type=int, help="use only the first n queries of the eval subset")
-    ap.add_argument("--pilot", action="store_true", help="run on the pilot split instead of the eval subset")
+    ap.add_argument("--split", default="core", choices=SPLITS, help="which query set to run")
+    ap.add_argument("--n", type=int, help="use only the first n queries of the split (quick tests)")
     ap.add_argument("--workers", type=int, default=8, help="episodes in flight at once")
     ap.add_argument("--dry-run", action="store_true", help="toy corpus + scripted policy, no model or GPU")
     args = ap.parse_args()
@@ -45,9 +51,7 @@ def main() -> None:
         systems = sorted(SYSTEMS)
     else:
         corpus = load_corpus(cfg.data.corpus_path)
-        pilot, evals = split_queries(load_queries(cfg.data.queries_path), cfg.data.subset_size,
-                                     cfg.data.subset_seed, cfg.data.pilot_size)
-        queries = pilot if args.pilot else evals
+        queries = split_queries(load_queries(cfg.data.queries_path), cfg.data)[args.split]
         llm, retriever = build_llm(cfg.model), build_retriever(cfg, corpus)
         systems = args.systems
     if args.n:

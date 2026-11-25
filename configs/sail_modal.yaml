@@ -1,0 +1,41 @@
+# Agents and judge on Sail, retrieval on Modal (deploy/modal_retriever.py).
+# Export SAIL_API_KEY first. Check every "pilot check" below before the full runs.
+
+model:
+  name: deepseek-ai/DeepSeek-V4.1-Flash-1017   # scale check: --set model.name=deepseek-ai/DeepSeek-V4-Pro-0813
+  base_url: https://api.sailresearch.com/v1
+  api_key_env: SAIL_API_KEY
+  service_tier: balanced                       # synchronous on chat completions, ~25% cheaper than asap
+  reasoning_effort: high
+  max_tokens_per_call: 16384
+  context_window: 131072                       # pilot check: Sail does not publish it; see GET /v1/models
+  carry_reasoning: true                        # pilot check: does Sail accept reasoning_content sent back?
+  reasoning_field: reasoning_content
+  prices: {input: 0.07, cached: 0.005, output: 0.22}   # V4.1 Flash, Balanced; V4 Pro: {input: 0.74, cached: 0.03, output: 2.22}
+
+data:
+  queries_path: data/browsecomp_plus_decrypted.jsonl
+  corpus_path: data/corpus.jsonl
+  pilot_size: 50
+  subset_size: 500
+  ablation_size: 150
+
+retrieval:
+  backend: http
+  http_url: https://REPLACE-with-the-url-modal-deploy-prints.modal.run
+  k: 5
+  snippet_tokens: 512
+
+budget:
+  B: 60000          # set after the pilot: ~p75 of L0's generated tokens
+
+judge:
+  model: Qwen/Qwen3.6-35B-A3B   # Flex-only on Sail, so it runs through the Batch API
+  base_url: https://api.sailresearch.com/v1
+  api_key_env: SAIL_API_KEY
+  mode: sail_batch
+  max_output_tokens: 4096
+
+output:
+  run_dir: runs/sweep
+  save_final_context: true

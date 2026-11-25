@@ -58,7 +58,9 @@ class OpenAIChatLLM:
     def chat(self, messages, tools, max_tokens, tool_choice=None) -> LLMResponse:
         import openai
 
-        kwargs: dict[str, Any] = {"model": self.cfg.name, "messages": messages, "max_tokens": max_tokens}
+        # max_completion_tokens is the current OpenAI name; vLLM accepts it and
+        # Sail rejects the older max_tokens.
+        kwargs: dict[str, Any] = {"model": self.cfg.name, "messages": messages, "max_completion_tokens": max_tokens}
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
@@ -66,6 +68,8 @@ class OpenAIChatLLM:
             kwargs["reasoning_effort"] = self.cfg.reasoning_effort
         if self.cfg.temperature is not None:
             kwargs["temperature"] = self.cfg.temperature
+        if self.cfg.service_tier:
+            kwargs["extra_body"] = {"service_tier": self.cfg.service_tier}
         try:
             resp = self.client.chat.completions.create(**kwargs)
         except openai.BadRequestError as e:
@@ -89,7 +93,19 @@ class OpenAIChatLLM:
             prompt_tokens=usage.prompt_tokens if usage else 0,
             completion_tokens=usage.completion_tokens if usage else 0,
             finish_reason=choice.finish_reason,
+            cached_tokens=_detail(usage, "prompt_tokens_details", "cached_tokens"),
+            reasoning_tokens=_detail(usage, "completion_tokens_details", "reasoning_tokens"),
         )
+
+
+def _detail(usage, group: str, key: str) -> int | None:
+    """Read e.g. usage.prompt_tokens_details.cached_tokens, whether the SDK
+    parsed it as an object or a dict; None if the server didn't report it."""
+    obj = getattr(usage, group, None) if usage else None
+    if obj is None:
+        return None
+    value = obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+    return int(value) if value is not None else None
 
 
 Policy = Callable[[list[dict[str, Any]], list[dict[str, Any]] | None, Any], LLMResponse]

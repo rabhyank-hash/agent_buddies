@@ -21,7 +21,7 @@ from typing import Iterable, Mapping
 
 from crossover.agents import make_system
 from crossover.agents.base import Episode, response_text
-from crossover.ledger import TokenLedger
+from crossover.ledger import TokenLedger, estimate_cost
 from crossover.pressure import PressureSearch
 from crossover.retrieval import Retriever
 from crossover.types import Query
@@ -67,6 +67,7 @@ def run_episode(cfg, llm, retriever: Retriever, corpus: Mapping[str, str], query
         "overflow": ep.overflow,
         "cap_hit": ep.cap_hit,
         "ledger": ledger.summary(),
+        "cost_usd": estimate_cost(ledger.summary(), cfg.model.prices),
         "steps": ledger.steps_as_dicts(),
         "answer_step": ep.answer_step,
         "peak_context": ep.peak_context,

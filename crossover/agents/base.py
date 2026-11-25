@@ -145,7 +145,8 @@ class Episode:
         resp = self.llm.chat(th.messages, specs or None, max_tokens, tool_choice)
         if kind is None:
             kind = "coordination" if {tc.name for tc in resp.tool_calls} & COORDINATION_TOOLS else "work"
-        step = self.ledger.record(th.agent_id, th.thread_id, resp.prompt_tokens, resp.completion_tokens, kind, self.sample)
+        step = self.ledger.record(th.agent_id, th.thread_id, resp.prompt_tokens, resp.completion_tokens, kind,
+                                  self.sample, resp.cached_tokens, resp.reasoning_tokens)
         th.last_step = step.idx
         th.prompt_trace.append(resp.prompt_tokens)
         with self.lock:

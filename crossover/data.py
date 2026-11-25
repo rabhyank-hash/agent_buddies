@@ -88,12 +88,27 @@ def export_corpus_from_hf(out_path: str | Path, name: str = "Tevatron/browsecomp
     return n
 
 
-def split_queries(
-    queries: list[Query], subset_size: int | None, seed: int, pilot_size: int = 0
-) -> tuple[list[Query], list[Query]]:
-    """Fixed-seed split into (pilot, eval). Smaller eval subsets are prefixes of
-    larger ones (300 ⊂ 500 ⊂ all), as the plan requires."""
+SPLITS = ("pilot", "core", "ablation", "rest", "nonpilot")
+
+
+def split_queries(queries: list[Query], data_cfg) -> dict[str, list[Query]]:
+    """Fixed-seed, deterministic splits of the 830 queries:
+
+      pilot     first `pilot_size` of the shuffle; prompt tuning only, never evaluated
+      core      next `subset_size` (500): every core experiment
+      ablation  the first `ablation_size` (150) of core: every ablation
+      rest      everything after core (~280): only the P100 S-iso vs. M-iso contrast
+      nonpilot  core + rest: the full P100 contrast
+    """
     order = sorted(queries, key=lambda q: q.query_id)
-    random.Random(seed).shuffle(order)
-    pilot, rest = order[:pilot_size], order[pilot_size:]
-    return pilot, (rest if subset_size is None else rest[:subset_size])
+    random.Random(data_cfg.subset_seed).shuffle(order)
+    pilot, nonpilot = order[: data_cfg.pilot_size], order[data_cfg.pilot_size:]
+    n = len(nonpilot) if data_cfg.subset_size is None else data_cfg.subset_size
+    core = nonpilot[:n]
+    return {
+        "pilot": pilot,
+        "core": core,
+        "ablation": core[: data_cfg.ablation_size],
+        "rest": nonpilot[n:],
+        "nonpilot": nonpilot,
+    }

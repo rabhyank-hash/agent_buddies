@@ -32,6 +32,8 @@ class LLMResponse:
     prompt_tokens: int
     completion_tokens: int
     finish_reason: str | None = None
+    cached_tokens: int | None = None  # None = the server did not report it
+    reasoning_tokens: int | None = None
 
 
 @dataclass

@@ -25,6 +25,11 @@ def pct(xs, q):
     return float(np.percentile(xs, q)) if len(xs) else None
 
 
+def _mean(xs):
+    xs = [x for x in xs if x is not None]
+    return float(np.mean(xs)) if xs else None
+
+
 def diagnostics(rows: list[dict]) -> dict:
     """Pilot gates: peak context, tokens per trajectory, searches, branching, cap/overflow rates."""
     out = {}
@@ -46,6 +51,11 @@ def diagnostics(rows: list[dict]) -> dict:
             "answered_rate": float(np.mean([r["answered"] for r in rs])),
             "neg_repeat_rate": float(np.mean([r["search_stats"]["negative_repeat_rate"] for r in rs])),
             "coordination_share": float(np.mean([r["ledger"]["coordination_share"] for r in rs])),
+            # Pilot gates for API providers: None = the server never reported it.
+            "cost_usd_mean": _mean([r.get("cost_usd") for r in rs]),
+            "cached_share": _mean([r["ledger"]["cached"] / r["ledger"]["prefill"]
+                                   for r in rs if r["ledger"].get("cached") is not None and r["ledger"]["prefill"]]),
+            "reasoning_tokens_reported": any(r["ledger"].get("reasoning") is not None for r in rs),
         }
     return out
 

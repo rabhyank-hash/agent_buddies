@@ -50,41 +50,42 @@ def snippet_in_context(doc_text: str, context: str, probe_chars: int = 300) -> b
     return bool(probe) and probe in " ".join(context.split())
 
 
-def attribute(
-    record: dict,
-    question: str,
-    answer: str,
-    corpus: Mapping[str, str],
-    keyfact_check: Callable[[str], str] | None,
-    max_context_chars: int = 400_000,
-    max_doc_chars: int = 12_000,
-) -> dict:
-    """Return {"category": a|b|c|d|None, ...}. None means the answer was correct."""
+def keyfact_prompts(record: dict, question: str, answer: str, corpus: Mapping[str, str],
+                    max_context_chars: int = 400_000, max_doc_chars: int = 12_000) -> tuple[list[str], dict[str, str]]:
+    """For a failed trajectory whose gold docs were cited: (docids whose snippet
+    is verbatim in the final context, {docid: key-fact prompt} for the rest)."""
+    context = load_context(record)
+    verbatim, prompts = [], {}
+    for docid in record["gold_cited"]:
+        doc = corpus.get(docid, "")
+        if snippet_in_context(doc, context):
+            verbatim.append(docid)
+        else:
+            prompts[docid] = KEYFACT_TEMPLATE.format(question=question, answer=answer, gold_doc=doc[:max_doc_chars],
+                                                     context=context[-max_context_chars:])
+    return verbatim, prompts
+
+
+def categorize(record: dict, verbatim: list[str] | None = None, verdicts: dict[str, str] | None = None) -> dict:
+    """Failure category from the record plus key-fact verdicts {docid: judge text}.
+    None means the answer was correct."""
     if record.get("correct"):
         return {"category": None}
     if not record["gold_seen"]:
         return {"category": "a"}
-    used = record["gold_cited"]
-    if not used:
+    if not record["gold_cited"]:
         return {"category": "b", "gold_seen": record["gold_seen"]}
+    present = list(verbatim or []) + [d for d, v in (verdicts or {}).items() if "present: yes" in v.lower()]
+    return {"category": "d" if present else "c", "used": record["gold_cited"], "present": present}
 
-    context = load_context(record)
-    present, method = [], {}
-    for docid in used:
-        doc = corpus.get(docid, "")
-        if snippet_in_context(doc, context):
-            present.append(docid)
-            method[docid] = "verbatim"
-            continue
-        if keyfact_check is None:
-            method[docid] = "unchecked"
-            continue
-        prompt = KEYFACT_TEMPLATE.format(question=question, answer=answer, gold_doc=doc[:max_doc_chars],
-                                         context=context[-max_context_chars:])
-        verdict = keyfact_check(prompt).lower()
-        method[docid] = "llm"
-        if "present: yes" in verdict:
-            present.append(docid)
-    if keyfact_check is None and not present:
-        return {"category": "c?", "used": used, "method": method}
-    return {"category": "d" if present else "c", "used": used, "present": present, "method": method}
+
+def attribute(record: dict, question: str, answer: str, corpus: Mapping[str, str],
+              keyfact_check: Callable[[str], str] | None) -> dict:
+    """One-record convenience wrapper (synchronous judge)."""
+    if record.get("correct") or not record["gold_seen"] or not record["gold_cited"]:
+        return categorize(record)
+    verbatim, prompts = keyfact_prompts(record, question, answer, corpus)
+    if keyfact_check is None and prompts and not verbatim:
+        return {"category": "c?", "used": record["gold_cited"]}
+    verdicts = {d: keyfact_check(p) for d, p in prompts.items()} if keyfact_check else {}
+    return categorize(record, verbatim, verdicts)

@@ -12,7 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Dense retrieval with Qwen3-Embedding-8B (needs a GPU in practice).
-dense = ["sentence-transformers", "torch"]
+dense = ["transformers", "torch"]
 # Loading BrowseComp-Plus straight from the Hugging Face hub.
 hf = ["datasets", "huggingface_hub"]
 

@@ -25,16 +25,23 @@ class ModelConfig:
     carry_reasoning: bool = True
     reasoning_field: str = "reasoning_content"
     request_timeout: float = 900.0
+    # Provider speed tier, sent as `service_tier` in the request body (Sail:
+    # asap | balanced). None = provider default.
+    service_tier: str | None = None
+    # Optional USD per 1M tokens, e.g. {input: 0.07, cached: 0.005, output: 0.22};
+    # when set, every trajectory record carries its estimated cost.
+    prices: dict[str, float] | None = None
 
 
 @dataclass
 class DataConfig:
     queries_path: str = "data/browsecomp_plus_decrypted.jsonl"
     corpus_path: str = "data/corpus.jsonl"
-    subset_size: int | None = 500
     subset_seed: int = 768
-    # Queries used for prompt tuning; excluded from every evaluation subset.
-    pilot_size: int = 100
+    # Fixed-seed, non-overlapping splits (see data.split_queries):
+    pilot_size: int = 50  # prompt tuning + pilot; never evaluated
+    subset_size: int | None = 500  # core experiments
+    ablation_size: int = 150  # ablations: the first 150 of the core 500
 
 
 @dataclass
@@ -43,7 +50,9 @@ class RetrievalConfig:
     http_url: str = "http://localhost:8001"
     dense_index_glob: str = "data/index/qwen3-embedding-8b/corpus.*.pkl"
     dense_model: str = "Qwen/Qwen3-Embedding-8B"
-    dense_query_prefix: str = ""  # must match how the index was built
+    # Must match how the prebuilt index was encoded (BrowseComp-Plus default).
+    dense_query_prefix: str = "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:"
+    dense_query_max_len: int = 512
     k: int = 5
     snippet_tokens: int = 512
 
@@ -79,6 +88,10 @@ class JudgeConfig:
     model: str = "gpt-4.1"
     base_url: str | None = None
     api_key_env: str = "OPENAI_API_KEY"
+    # chat: one synchronous chat-completions call per grade (vLLM, OpenAI).
+    # sail_batch: Sail Batch API over /v1/responses (Flex; needed for Flex-only models).
+    mode: str = "chat"
+    max_output_tokens: int = 4096
 
 
 @dataclass

@@ -72,18 +72,23 @@ class HTTPRetriever:
 
 
 class DenseRetriever:
-    """Exact inner-product search over precomputed document embeddings.
+    """Exact inner-product search over the prebuilt BrowseComp-Plus index.
 
-    Loads Tevatron-style shards (pickled (embeddings, docid_list) tuples), the
-    format BrowseComp-Plus uses for its released indexes. Queries are encoded
-    with sentence-transformers; `query_prefix` must match the instruction the
-    index was built with, or accuracy will be off. Check this against the
-    paper's numbers on the dev split (kickoff step 1).
+    The index (Tevatron/browsecomp-plus-indexes on the HF hub) holds the
+    document embeddings: 4 pickled (embeddings, docid_list) shards for
+    Qwen3-Embedding-8B, already L2-normalized. Only the agent's search queries
+    are encoded at run time, which is the one step that needs the 8B model.
+
+    Query encoding mirrors BrowseComp-Plus (searcher/searchers/faiss_searcher.py
+    and scripts_build_index/qwen3-embed.md): prefix + query, max length 512,
+    fp16, last-token ("eos") pooling, L2 normalization. Check that it matches
+    with scripts/check_retriever.py before any run.
     """
 
-    def __init__(self, index_glob: str, model_name: str, query_prefix: str = "", device: str | None = None):
+    def __init__(self, index_glob: str, model_name: str, query_prefix: str, max_len: int = 512, device: str | None = None):
         import numpy as np
-        from sentence_transformers import SentenceTransformer
+        import torch
+        from transformers import AutoModel, AutoTokenizer
 
         reps, ids = [], []
         for path in sorted(glob.glob(index_glob)):
@@ -93,18 +98,31 @@ class DenseRetriever:
             ids.extend(str(x) for x in lookup)
         if not reps:
             raise FileNotFoundError(f"No index shards match {index_glob}")
-        self._np = np
-        self.emb = np.concatenate(reps)
+        self.torch = torch
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        dtype = torch.float16 if self.device == "cuda" else torch.float32
+        self.emb = torch.from_numpy(np.concatenate(reps)).to(self.device, dtype)
         self.docids = ids
-        self.model = SentenceTransformer(model_name, device=device)
-        self.query_prefix = query_prefix
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
+        self.model = AutoModel.from_pretrained(model_name, torch_dtype=dtype).to(self.device).eval()
+        self.query_prefix, self.max_len = query_prefix, max_len
+
+    def encode(self, queries: list[str]):
+        torch = self.torch
+        batch = self.tokenizer([self.query_prefix + q for q in queries], padding=True, truncation=True,
+                               max_length=self.max_len, return_tensors="pt").to(self.device)
+        with torch.inference_mode():
+            hidden = self.model(**batch).last_hidden_state
+        reps = hidden[:, -1]  # left padding: the last position is each sequence's final token
+        return torch.nn.functional.normalize(reps.float(), dim=-1).to(self.emb.dtype)
+
+    def search_many(self, queries: list[str], k: int) -> list[list[str]]:
+        scores = self.encode(queries) @ self.emb.T
+        top = scores.topk(k, dim=-1).indices.tolist()
+        return [[self.docids[i] for i in row] for row in top]
 
     def search(self, query: str, k: int) -> list[str]:
-        q = self.model.encode([self.query_prefix + query], normalize_embeddings=True)[0]
-        scores = self.emb @ q.astype(self._np.float32)
-        top = self._np.argpartition(-scores, k)[:k]
-        top = top[self._np.argsort(-scores[top])]
-        return [self.docids[i] for i in top]
+        return self.search_many([query], k)[0]
 
 
 def build_retriever(cfg, corpus: Mapping[str, str] | None = None) -> Retriever:
@@ -116,5 +134,6 @@ def build_retriever(cfg, corpus: Mapping[str, str] | None = None) -> Retriever:
     if backend == "http":
         return HTTPRetriever(cfg.retrieval.http_url)
     if backend == "dense":
-        return DenseRetriever(cfg.retrieval.dense_index_glob, cfg.retrieval.dense_model, cfg.retrieval.dense_query_prefix)
+        r = cfg.retrieval
+        return DenseRetriever(r.dense_index_glob, r.dense_model, r.dense_query_prefix, r.dense_query_max_len)
     raise ValueError(f"Unknown retrieval backend {backend!r}")
