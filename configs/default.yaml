@@ -1,0 +1,49 @@
+# Defaults for the main sweep. Override any key on the command line:
+#   uv run python scripts/run.py --set budget.B=80000 --set agents.relay_cap_tokens=256
+
+model:
+  name: openai/gpt-oss-20b
+  base_url: http://localhost:8000/v1   # vLLM OpenAI-compatible server
+  reasoning_effort: high
+  max_tokens_per_call: 16384
+  context_window: 131072
+  carry_reasoning: true
+
+data:
+  queries_path: data/browsecomp_plus_decrypted.jsonl
+  corpus_path: data/corpus.jsonl
+  subset_size: 500        # null = every non-pilot query
+  subset_seed: 768
+  pilot_size: 100
+
+retrieval:
+  backend: http           # bm25 (toy/dev only) | dense | http
+  http_url: http://localhost:8001
+  k: 5
+  snippet_tokens: 512
+
+pressure:
+  levels: [0.0, 0.25, 0.5, 0.75, 1.0]
+  protect: gold
+
+budget:
+  B: 60000                # set after the pilot: ~p75 of L0's generated tokens
+  wrap_up_frac: 0.9
+  definition: generated
+
+agents:
+  max_turns: 80
+  max_subtask_turns: 30
+  relay_cap_tokens: null  # 64 | 256 | 1024 for the relay-bandwidth dial
+  parent_can_search: true
+  max_parallel_workers: 4
+  force_branch_after_searches: null
+  summary_trigger_tokens: 90000
+  sc_samples: 4
+
+judge:
+  model: gpt-4.1
+
+output:
+  run_dir: runs/sweep
+  save_final_context: true

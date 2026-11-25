@@ -1,0 +1,30 @@
+[project]
+name = "crossover"
+version = "0.1.0"
+description = "When Does a Single Agent Need Teammates? Locating the context-pressure crossover on BrowseComp-Plus (11-768 final project)"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml",
+    "numpy",
+    "openai>=1.40",
+    "tiktoken>=0.11",   # o200k_harmony encoding (gpt-oss tokenizer)
+]
+
+[project.optional-dependencies]
+# Dense retrieval with Qwen3-Embedding-8B (needs a GPU in practice).
+dense = ["sentence-transformers", "torch"]
+# Loading BrowseComp-Plus straight from the Hugging Face hub.
+hf = ["datasets", "huggingface_hub"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["crossover*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
